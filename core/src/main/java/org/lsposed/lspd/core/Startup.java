@@ -75,7 +75,7 @@ public class Startup {
 
     public static void initXposed(boolean isSystem, String processName, String appDir, ILSPApplicationService service) {
         // init logger
-        ApplicationServiceClient.Init(service, processName);
+        // ApplicationServiceClient.Init(service, processName);
         XposedBridge.initXResources();
         XposedInit.startsSystemServer = isSystem;
         LSPosedContext.isSystemServer = isSystem;

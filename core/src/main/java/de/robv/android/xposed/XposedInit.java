@@ -224,28 +224,28 @@ public final class XposedInit {
     }
 
     public static void loadLegacyModules() {
-        var moduleList = serviceClient.getLegacyModulesList();
-        moduleList.forEach(module -> {
-            var apk = module.apkPath;
-            var name = module.packageName;
-            var file = module.file;
-            loadedModules.put(name, Optional.of(apk)); // temporarily add it for XSharedPreference
-            if (!loadModule(name, apk, file)) {
-                loadedModules.remove(name);
-            }
-        });
+        // var moduleList = serviceClient.getLegacyModulesList();
+        // moduleList.forEach(module -> {
+        //     var apk = module.apkPath;
+        //     var name = module.packageName;
+        //     var file = module.file;
+        //     loadedModules.put(name, Optional.of(apk)); // temporarily add it for XSharedPreference
+        //     if (!loadModule(name, apk, file)) {
+        //         loadedModules.remove(name);
+        //     }
+        // });
     }
 
     public static void loadModules(ActivityThread at) {
-        var packages = (ArrayMap<?, ?>) XposedHelpers.getObjectField(at, "mPackages");
-        serviceClient.getModulesList().forEach(module -> {
-            loadedModules.put(module.packageName, Optional.empty());
-            if (!LSPosedContext.loadModule(at, module)) {
-                loadedModules.remove(module.packageName);
-            } else {
-                packages.remove(module.packageName);
-            }
-        });
+        // var packages = (ArrayMap<?, ?>) XposedHelpers.getObjectField(at, "mPackages");
+        // serviceClient.getModulesList().forEach(module -> {
+        //     loadedModules.put(module.packageName, Optional.empty());
+        //     if (!LSPosedContext.loadModule(at, module)) {
+        //         loadedModules.remove(module.packageName);
+        //     } else {
+        //         packages.remove(module.packageName);
+        //     }
+        // });
     }
 
     /**

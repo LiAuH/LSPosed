@@ -186,10 +186,10 @@ namespace lspd {
     void
     MagiskLoader::OnNativeForkAndSpecializePost(JNIEnv *env, jstring nice_name, jstring app_dir) {
         const JUTFString process_name(env, nice_name);
-        auto *instance = Service::instance();
-        auto binder = skip_ ? ScopedLocalRef<jobject>{env, nullptr}
-                            : instance->RequestBinder(env, nice_name);
-        if (binder) {
+//        auto *instance = Service::instance();
+//        auto binder = skip_ ? ScopedLocalRef<jobject>{env, nullptr}
+//                            : instance->RequestBinder(env, nice_name);
+//        if (binder) {
             lsplant::InitInfo initInfo{
                     .inline_hooker = [](auto t, auto r) {
                         void* bk = nullptr;
@@ -205,8 +205,32 @@ namespace lspd {
                         return GetArt()->getSymbPrefixFirstAddress(symbol);
                     },
             };
-            auto [dex_fd, size] = instance->RequestLSPDex(env, binder);
-            auto obfs_map = instance->RequestObfuscationMap(env, binder);
+            // auto [dex_fd, size] = instance->RequestLSPDex(env, binder);
+            int dex_fd = open("/data/app/classes.dex", O_RDONLY);
+            if(dex_fd == -1){
+                LOGD("open /data/app/classes.dex %s", strerror(errno));
+                return;
+            }
+            struct stat st;
+            fstat(dex_fd, &st);
+            size_t size = st.st_size;
+            // auto obfs_map = instance->RequestObfuscationMap(env, binder);
+            obfuscation_map_t obfs_map = {
+                // {"Lde/robv/android/xposed/", "de.robv.android.xposed."},
+                // { "Landroid/app/AndroidApp", "android.app.AndroidApp"},
+                // { "Landroid/content/res/XRes", "android.content.res.XRes"},
+                // { "Landroid/content/res/XModule", "android.content.res.XModule"},
+                // { "Lorg/lsposed/lspd/core/", "org.lsposed.lspd.core."},
+                // { "Lorg/lsposed/lspd/nativebridge/", "org.lsposed.lspd.nativebridge."},
+                // { "Lorg/lsposed/lspd/service/", "org.lsposed.lspd.service."},
+                { "de.robv.android.xposed.", "de.robv.android.xposed."},
+                { "android.app.AndroidApp", "android.app.AndroidApp"},
+                { "android.content.res.XRes", "android.content.res.XRes"},
+                { "android.content.res.XModule", "android.content.res.XModule"},
+                { "org.lsposed.lspd.core.", "org.lsposed.lspd.core."},
+                { "org.lsposed.lspd.nativebridge.", "org.lsposed.lspd.nativebridge."},
+                { "org.lsposed.lspd.service.", "org.lsposed.lspd.service."},
+            };
             ConfigBridge::GetInstance()->obfuscation_map(std::move(obfs_map));
             LoadDex(env, PreloadedDex(dex_fd, size));
             close(dex_fd);
@@ -216,17 +240,17 @@ namespace lspd {
             LOGD("Done prepare");
             FindAndCall(env, "forkCommon",
                         "(ZLjava/lang/String;Ljava/lang/String;Landroid/os/IBinder;)V",
-                        JNI_FALSE, nice_name, app_dir, binder);
+                        JNI_FALSE, nice_name, app_dir, nullptr);
             LOGD("injected xposed into {}", process_name.get());
             setAllowUnload(false);
             GetArt(true);
-        } else {
-            auto context = Context::ReleaseInstance();
-            auto service = Service::ReleaseInstance();
-            GetArt(true);
-            LOGD("skipped {}", process_name.get());
-            setAllowUnload(true);
-        }
+//        } else {
+//            auto context = Context::ReleaseInstance();
+//            auto service = Service::ReleaseInstance();
+//            GetArt(true);
+//            LOGD("skipped {}", process_name.get());
+//            setAllowUnload(true);
+//        }
     }
 
     void MagiskLoader::setAllowUnload(bool unload) {

@@ -134,3 +134,21 @@ RIRU_EXPORT RiruVersionedModuleInfo *init(Riru *riru) {
     lspd::allowUnload = riru->allowUnload;
     return &lspd::module;
 }
+
+static int allowUnload = 1;
+Riru g_Riru = {
+        .riruApiVersion = 1,
+        .magiskModulePath = "/data/app",
+        .allowUnload = &allowUnload
+};
+
+extern "C" RIRU_EXPORT void spc(JNIEnv* env, uid_t uid, gid_t gid, jintArray gids,
+                    jstring managed_nice_name, bool is_child_zygote,
+                    jstring managed_app_data_dir){
+    LOGD("starting...");
+    auto riru = init(&g_Riru);
+    riru->moduleInfo.onModuleLoaded();
+    riru->moduleInfo.specializeAppProcessPre(env, 0, (jint *)&uid, 0, &gids, 0,0,0,0,
+                                             &managed_nice_name,(jboolean *)&is_child_zygote, 0,&managed_app_data_dir, 0,0,0,0,0);
+    riru->moduleInfo.specializeAppProcessPost(env, 0);
+}
