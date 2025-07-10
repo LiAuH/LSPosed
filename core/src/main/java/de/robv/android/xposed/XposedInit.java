@@ -38,18 +38,29 @@ import android.content.res.XResources;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.Process;
+import android.os.SharedMemory;
+import android.system.ErrnoException;
+import android.system.OsConstants;
 import android.util.ArrayMap;
 import android.util.Log;
 
 import org.lsposed.lspd.impl.LSPosedContext;
+import org.lsposed.lspd.models.Module;
 import org.lsposed.lspd.models.PreLoadedApk;
 import org.lsposed.lspd.nativebridge.NativeAPI;
 import org.lsposed.lspd.nativebridge.ResourcesHook;
 import org.lsposed.lspd.util.LspModuleClassLoader;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
+import java.nio.channels.Channels;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +68,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.ZipFile;
 
 import de.robv.android.xposed.callbacks.XC_InitPackageResources;
 import de.robv.android.xposed.callbacks.XCallback;
@@ -223,17 +235,111 @@ public final class XposedInit {
         return loadedModules;
     }
 
+    private static SharedMemory readDex(InputStream in, boolean obfuscate) throws IOException, ErrnoException {
+        var memory = SharedMemory.create(null, in.available());
+        var byteBuffer = memory.mapReadWrite();
+        Channels.newChannel(in).read(byteBuffer);
+        SharedMemory.unmap(byteBuffer);
+//        if (obfuscate) {
+//            var newMemory = ObfuscationManager.obfuscateDex(memory);
+//            if (memory != newMemory) {
+//                memory.close();
+//                memory = newMemory;
+//            }
+//        }
+        memory.setProtect(OsConstants.PROT_READ);
+        return memory;
+    }
+
+    private static void readDexes(ZipFile apkFile, List<SharedMemory> preLoadedDexes,
+                                  boolean obfuscate) {
+        int secondary = 2;
+        for (var dexFile = apkFile.getEntry("classes.dex"); dexFile != null;
+            dexFile = apkFile.getEntry("classes" + secondary + ".dex"), secondary++) {
+            try (var is = apkFile.getInputStream(dexFile)) {
+                preLoadedDexes.add(readDex(is, obfuscate));
+            } catch (IOException | ErrnoException e) {
+                Log.w(TAG, "Can not load " + dexFile + " in " + apkFile, e);
+            }
+        }
+    }
+
+    private static void readName(ZipFile apkFile, String initName, List<String> names) {
+        var initEntry = apkFile.getEntry(initName);
+        if (initEntry == null) return;
+        try (var in = apkFile.getInputStream(initEntry)) {
+            var reader = new BufferedReader(new InputStreamReader(in));
+            String name;
+            while ((name = reader.readLine()) != null) {
+                name = name.trim();
+                if (name.isEmpty() || name.startsWith("#")) continue;
+                names.add(name);
+            }
+        } catch (IOException | OutOfMemoryError e) {
+            Log.e(TAG, "Can not open " + initEntry, e);
+        }
+    }
+    public static PreLoadedApk loadModuleFile(String path, boolean obfuscate) {
+        if (path == null) return null;
+        var file = new PreLoadedApk();
+        var preLoadedDexes = new ArrayList<SharedMemory>();
+        var moduleClassNames = new ArrayList<String>(1);
+        var moduleLibraryNames = new ArrayList<String>(1);
+        // try (var apkFile = new ZipFile(toGlobalNamespace(path))) {
+        try (var apkFile = new ZipFile(path)) {
+            readDexes(apkFile, preLoadedDexes, obfuscate);
+            readName(apkFile, "META-INF/xposed/java_init.list", moduleClassNames);
+            if (moduleClassNames.isEmpty()) {
+                file.legacy = true;
+                readName(apkFile, "assets/xposed_init", moduleClassNames);
+                readName(apkFile, "assets/native_init", moduleLibraryNames);
+            } else {
+                file.legacy = false;
+                readName(apkFile, "META-INF/xposed/native_init.list", moduleLibraryNames);
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Can not open " + path, e);
+            return null;
+        }
+        if (preLoadedDexes.isEmpty()) return null;
+        if (moduleClassNames.isEmpty()) return null;
+
+//        if (obfuscate) {
+//            var signatures = ObfuscationManager.getSignatures();
+//            for (int i = 0; i < moduleClassNames.size(); i++) {
+//                var s = moduleClassNames.get(i);
+//                for (var entry : signatures.entrySet()) {
+//                    if (s.startsWith(entry.getKey())) {
+//                        moduleClassNames.add(i, s.replace(entry.getKey(), entry.getValue()));
+//                    }
+//                }
+//            }
+//        }
+
+        file.preLoadedDexes = preLoadedDexes;
+        file.moduleClassNames = moduleClassNames;
+        file.moduleLibraryNames = moduleLibraryNames;
+        return file;
+    }
     public static void loadLegacyModules() {
+        List<Module> modules = new ArrayList<>();
+        if(Files.exists(Paths.get("/data/app/hooks.apk"))){
+            var module = new Module();
+            module.packageName = "lsphook";
+            module.apkPath = "/data/app/hooks.apk";
+            module.file = loadModuleFile(module.apkPath, false);
+            modules.add(module);
+        }
         // var moduleList = serviceClient.getLegacyModulesList();
-        // moduleList.forEach(module -> {
-        //     var apk = module.apkPath;
-        //     var name = module.packageName;
-        //     var file = module.file;
-        //     loadedModules.put(name, Optional.of(apk)); // temporarily add it for XSharedPreference
-        //     if (!loadModule(name, apk, file)) {
-        //         loadedModules.remove(name);
-        //     }
-        // });
+        modules.forEach(m -> {
+            var apk = m.apkPath;
+            var name = m.packageName;
+            var file = m.file;
+            loadedModules.put(name, Optional.of(apk)); // temporarily add it for XSharedPreference
+            if (!loadModule(name, apk, file)) {
+                loadedModules.remove(name);
+            }
+        });
     }
 
     public static void loadModules(ActivityThread at) {
